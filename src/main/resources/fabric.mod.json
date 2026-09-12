@@ -1,0 +1,26 @@
+{
+	"schemaVersion": 1,
+	"id": "carrytracker",
+	"version": "${version}",
+	"name": "CarryTracker",
+	"description": "Track Hypixel carry slots and kills from client chat commands.",
+	"authors": [
+		"CarryTracker"
+	],
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"dev.carrytracker.CarryTracker"
+		],
+		"client": [
+			"dev.carrytracker.client.CarryTrackerClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.1.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
