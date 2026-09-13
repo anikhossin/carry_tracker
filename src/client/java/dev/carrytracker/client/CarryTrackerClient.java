@@ -5,6 +5,7 @@ import java.util.Locale;
 import dev.carrytracker.CarryTracker;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -19,8 +20,10 @@ public class CarryTrackerClient implements ClientModInitializer {
 		hudSettings.load();
 		CarryHud hud = new CarryHud(session, hudSettings);
 		CarryCommands commands = new CarryCommands(session, hud);
+		KillDetector detector = new KillDetector(session, commands);
 
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> commands.register(dispatcher));
+		ClientTickEvents.END_CLIENT_TICK.register(client -> detector.onTick());
 
 		ClientSendMessageEvents.ALLOW_COMMAND.register(command -> {
 			String value = command.trim().toLowerCase(Locale.ROOT);
@@ -32,9 +35,11 @@ public class CarryTrackerClient implements ClientModInitializer {
 
 		ClientReceiveMessageEvents.CHAT.register((message, playerChatMessage, sender, boundChatType, timeStamp) -> {
 			PartyTracker.INSTANCE.onMessage(message);
+			detector.onMessage(message);
 		});
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			PartyTracker.INSTANCE.onMessage(message);
+			detector.onMessage(message);
 		});
 
 		HudElementRegistry.attachElementBefore(

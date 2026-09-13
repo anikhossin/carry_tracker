@@ -105,8 +105,8 @@ public final class CarryHud {
 		}
 	}
 
-	private static String titleText() {
-		return "CarryTracker";
+	private String titleText() {
+		return session.autoDetect() ? "CarryTracker  AUTO" : "CarryTracker";
 	}
 
 	private static String lineFor(CarrySlot slot) {

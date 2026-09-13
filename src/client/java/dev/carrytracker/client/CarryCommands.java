@@ -5,6 +5,7 @@ import java.util.Optional;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
@@ -56,6 +57,7 @@ public final class CarryCommands {
 				incrementKillFromOptionalSlot(Optional.empty());
 				return 1;
 			})
+			.then(autoDetectNode())
 			.then(ClientCommands.argument("slot", IntegerArgumentType.integer(1)).executes(context -> {
 				incrementKillFromOptionalSlot(Optional.of(IntegerArgumentType.getInteger(context, "slot")));
 				return 1;
@@ -124,6 +126,7 @@ public final class CarryCommands {
 					incrementKillFromOptionalSlot(Optional.empty());
 					return 1;
 				})
+				.then(autoDetectNode())
 				.then(ClientCommands.argument("slot", IntegerArgumentType.integer(1)).executes(context -> {
 					incrementKillFromOptionalSlot(Optional.of(IntegerArgumentType.getInteger(context, "slot")));
 					return 1;
@@ -141,6 +144,22 @@ public final class CarryCommands {
 					resetHud();
 					return 1;
 				}))));
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> autoDetectNode() {
+		return ClientCommands.literal("auto")
+			.executes(context -> {
+				toggleAutoDetect();
+				return 1;
+			})
+			.then(ClientCommands.literal("on").executes(context -> {
+				setAutoDetect(true);
+				return 1;
+			}))
+			.then(ClientCommands.literal("off").executes(context -> {
+				setAutoDetect(false);
+				return 1;
+			}));
 	}
 
 	private void incrementKillFromOptionalSlot(Optional<Integer> slotId) {
@@ -176,6 +195,22 @@ public final class CarryCommands {
 	private void resetHud() {
 		hud.settings().reset();
 		GameMessages.local(Component.literal("HUD position reset.").withStyle(ChatFormatting.YELLOW));
+	}
+
+	private void toggleAutoDetect() {
+		setAutoDetect(!session.autoDetect());
+	}
+
+	private void setAutoDetect(boolean enabled) {
+		session.setAutoDetect(enabled);
+		GameMessages.local(Component.literal(enabled
+				? "Auto kill detection on. /k still works as a backup."
+				: "Auto kill detection off. Use /k to count kills.")
+			.withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
+	}
+
+	public void recordKill(int slotId, boolean auto) {
+		incrementKill(slotId, auto);
 	}
 
 	private void addGoal(String username, int amount) {
@@ -227,6 +262,10 @@ public final class CarryCommands {
 	}
 
 	private void incrementKill(int slotId) {
+		incrementKill(slotId, false);
+	}
+
+	private void incrementKill(int slotId, boolean auto) {
 		Optional<CarrySlot> found = session.get(slotId);
 		if (found.isEmpty()) {
 			GameMessages.localError("No carry slot #" + slotId + ".");
@@ -235,6 +274,10 @@ public final class CarryCommands {
 
 		CarrySlot slot = found.get();
 		boolean alreadyComplete = slot.isComplete();
+		if (auto && alreadyComplete) {
+			return;
+		}
+
 		session.addKills(slot, 1);
 		int goal = slot.killGoal();
 
@@ -248,16 +291,16 @@ public final class CarryCommands {
 		if (slot.kills >= goal) {
 			GameMessages.party(slot.username + " " + goal + "/" + goal + " DONE! GG");
 			GameMessages.showCompletionTitle(slot.username, goal);
-			GameMessages.local(Component.literal("Slot #" + slot.id + " " + slot.username
-				+ " finished (" + goal + "/" + goal + ").")
+			GameMessages.local(Component.literal((auto ? "Auto-counted: slot #" : "Slot #")
+				+ slot.id + " " + slot.username + " finished (" + goal + "/" + goal + ").")
 				.withStyle(ChatFormatting.GREEN));
 			return;
 		}
 
 		int left = goal - slot.kills;
 		GameMessages.party(slot.username + " " + slot.kills + "/" + goal + " done! " + left + " left.");
-		GameMessages.local(Component.literal("Kill logged on #" + slot.id + " " + slot.username
-			+ " (" + slot.kills + "/" + goal + ").")
+		GameMessages.local(Component.literal((auto ? "Auto-counted kill on #" : "Kill logged on #")
+			+ slot.id + " " + slot.username + " (" + slot.kills + "/" + goal + ").")
 			.withStyle(ChatFormatting.GREEN));
 	}
 
@@ -280,6 +323,7 @@ public final class CarryCommands {
 		GameMessages.local("/carry clear — clear all slots");
 		GameMessages.local("/carryremove <slot> — remove one slot, e.g. /carryremove 1");
 		GameMessages.local("/k — add a kill (or /k <slot> if more than one)");
+		GameMessages.local("/k auto — toggle auto slayer kill detection");
 		GameMessages.local("/check — summary");
 		GameMessages.local("/hud — HUD editor    /hud toggle    /hud reset");
 		GameMessages.local("Also: /ct carry, /ct k, /ct clear, /ct hud, /ct check");

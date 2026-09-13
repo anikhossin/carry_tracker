@@ -23,6 +23,7 @@ public final class CarrySession {
 	}
 
 	private final List<CarrySlot> slots = new ArrayList<>();
+	private boolean autoDetect = true;
 
 	public List<CarrySlot> slots() {
 		return List.copyOf(slots);
@@ -30,6 +31,19 @@ public final class CarrySession {
 
 	public boolean isEmpty() {
 		return slots.isEmpty();
+	}
+
+	public boolean autoDetect() {
+		return autoDetect;
+	}
+
+	public void setAutoDetect(boolean autoDetect) {
+		this.autoDetect = autoDetect;
+		save();
+	}
+
+	public List<CarrySlot> incompleteSlots() {
+		return slots.stream().filter(slot -> !slot.isComplete()).toList();
 	}
 
 	public CarrySlot addGoal(String username, int amount) {
@@ -89,12 +103,15 @@ public final class CarrySession {
 
 		try (Reader reader = Files.newBufferedReader(savePath)) {
 			SaveData data = GSON.fromJson(reader, SaveData.class);
-			if (data != null && data.slots != null) {
-				for (CarrySlot slot : data.slots) {
-					if (slot.goal < 1) {
-						slot.goal = slot.carries > 0 ? slot.carries : 1;
+			if (data != null) {
+				autoDetect = data.autoDetect() == null || data.autoDetect();
+				if (data.slots() != null) {
+					for (CarrySlot slot : data.slots()) {
+						if (slot.goal < 1) {
+							slot.goal = slot.carries > 0 ? slot.carries : 1;
+						}
+						slots.add(slot);
 					}
-					slots.add(slot);
 				}
 			}
 		} catch (IOException exception) {
@@ -107,13 +124,13 @@ public final class CarrySession {
 			Path savePath = savePath();
 			Files.createDirectories(savePath.getParent());
 			try (Writer writer = Files.newBufferedWriter(savePath)) {
-				GSON.toJson(new SaveData(slots), writer);
+				GSON.toJson(new SaveData(slots, autoDetect), writer);
 			}
 		} catch (IOException exception) {
 			CarryTracker.LOGGER.error("Failed to save carry session", exception);
 		}
 	}
 
-	private record SaveData(List<CarrySlot> slots) {
+	private record SaveData(List<CarrySlot> slots, Boolean autoDetect) {
 	}
 }
