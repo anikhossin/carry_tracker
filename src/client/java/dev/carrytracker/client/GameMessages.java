@@ -34,10 +34,6 @@ public final class GameMessages {
 	}
 
 	public static void party(String message) {
-		if (!PartyTracker.INSTANCE.inParty()) {
-			return;
-		}
-
 		Minecraft client = Minecraft.getInstance();
 		if (client.player == null) {
 			return;
@@ -46,7 +42,7 @@ public final class GameMessages {
 		sendingPartyAnnounce = true;
 		client.execute(() -> client.execute(() -> {
 			try {
-				if (client.player != null && PartyTracker.INSTANCE.inParty()) {
+				if (client.player != null) {
 					client.player.connection.sendCommand("pc " + message);
 				}
 			} finally {

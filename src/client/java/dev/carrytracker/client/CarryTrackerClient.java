@@ -35,11 +35,9 @@ public class CarryTrackerClient implements ClientModInitializer {
 
 		ClientReceiveMessageEvents.CHAT.register((message, playerChatMessage, sender, boundChatType, timeStamp) -> {
 			PartyTracker.INSTANCE.onMessage(message);
-			detector.onMessage(message);
 		});
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			PartyTracker.INSTANCE.onMessage(message);
-			detector.onMessage(message);
 		});
 
 		HudElementRegistry.attachElementBefore(

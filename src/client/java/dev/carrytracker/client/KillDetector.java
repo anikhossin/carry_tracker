@@ -4,11 +4,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import dev.carrytracker.CarryTracker;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -29,15 +29,18 @@ public final class KillDetector {
 		"Inferno Demonlord",
 		"Riftstalker Bloodfiend"
 	};
-	private static final long DEBOUNCE_MS = 2000L;
-	private static final double SEARCH_RANGE = 96d;
+	private static final long DEBOUNCE_MS = 2500L;
+	private static final double SEARCH_RANGE = 64d;
+	private static final double NAMETAG_RANGE = 4d;
+	private static final int MIN_ALIVE_TICKS = 40;
 
 	private final CarrySession session;
 	private final CarryCommands commands;
-	private final Map<Integer, TrackedBoss> tracked = new HashMap<>();
+	private final Map<Integer, String> spawners = new HashMap<>();
+	private final Map<Integer, Integer> aliveTicks = new HashMap<>();
 	private ClientLevel currentWorld;
-	private String lastSpawner;
 	private long lastCountAt;
+	private boolean disabled;
 
 	public KillDetector(CarrySession session, CarryCommands commands) {
 		this.session = session;
@@ -45,23 +48,38 @@ public final class KillDetector {
 	}
 
 	public void onTick() {
-		if (!session.autoDetect() || session.isEmpty()) {
-			tracked.clear();
+		if (disabled) {
+			return;
+		}
+
+		try {
+			tick();
+		} catch (Throwable exception) {
+			disabled = true;
+			clearTracked();
+			CarryTracker.LOGGER.error("Kill detector failed; auto-detect disabled for this session", exception);
+			GameMessages.local(Component.literal("Auto-detect crashed and was turned off. Use /k for now.")
+				.withStyle(ChatFormatting.RED));
+		}
+	}
+
+	private void tick() {
+		if (!session.autoDetect() || session.incompleteSlots().isEmpty()) {
+			clearTracked();
 			return;
 		}
 
 		Minecraft client = Minecraft.getInstance();
 		ClientLevel level = client.level;
 		if (level == null || client.player == null) {
-			tracked.clear();
+			clearTracked();
 			currentWorld = null;
 			return;
 		}
 
 		if (currentWorld != level) {
-			tracked.clear();
+			clearTracked();
 			currentWorld = level;
-			lastSpawner = null;
 			return;
 		}
 
@@ -80,46 +98,29 @@ public final class KillDetector {
 			}
 
 			String spawner = findSpawner(stands);
-			if (spawner != null) {
-				lastSpawner = spawner;
+			if (spawner == null || session.findByUsername(spawner).filter(slot -> !slot.isComplete()).isEmpty()) {
+				continue;
 			}
 
 			int id = entity.getId();
 			seen.add(id);
-			tracked.putIfAbsent(id, new TrackedBoss(spawner));
-			if (spawner != null) {
-				tracked.get(id).spawner = spawner;
-			}
+			spawners.put(id, spawner);
+			int ticks = aliveTicks.getOrDefault(id, 0);
 
 			if (entity.isDeadOrDying()) {
-				countBoss(tracked.remove(id));
+				if (ticks >= MIN_ALIVE_TICKS) {
+					countKill(spawner);
+				}
+				spawners.remove(id);
+				aliveTicks.remove(id);
+				continue;
 			}
-		}
-	}
 
-	public void onMessage(Component message) {
-		if (!session.autoDetect() || session.isEmpty()) {
-			return;
+			aliveTicks.put(id, ticks + 1);
 		}
 
-		String text = ChatFormatting.stripFormatting(message.getString());
-		if (text == null || text.isBlank()) {
-			return;
-		}
-
-		String lower = text.toLowerCase(Locale.ROOT);
-		if (!lower.contains("slayer boss slain") && !lower.contains("slayer quest complete")) {
-			return;
-		}
-
-		countKill(lastSpawner);
-	}
-
-	private void countBoss(TrackedBoss boss) {
-		if (boss == null) {
-			return;
-		}
-		countKill(boss.spawner != null ? boss.spawner : lastSpawner);
+		spawners.keySet().removeIf(id -> !seen.contains(id));
+		aliveTicks.keySet().removeIf(id -> !seen.contains(id));
 	}
 
 	private void countKill(String spawner) {
@@ -128,11 +129,9 @@ public final class KillDetector {
 			return;
 		}
 
-		Optional<CarrySlot> slot = resolveSlot(spawner);
+		Optional<CarrySlot> slot = session.findByUsername(spawner)
+			.filter(found -> !found.isComplete());
 		if (slot.isEmpty()) {
-			if (!session.incompleteSlots().isEmpty()) {
-				GameMessages.localError("Slayer kill detected, but more than one slot is active. Use /k <slot>.");
-			}
 			return;
 		}
 
@@ -140,25 +139,15 @@ public final class KillDetector {
 		commands.recordKill(slot.get().id, true);
 	}
 
-	private Optional<CarrySlot> resolveSlot(String spawner) {
-		if (spawner != null && !spawner.isBlank()) {
-			Optional<CarrySlot> named = session.findByUsername(spawner);
-			if (named.isPresent() && !named.get().isComplete()) {
-				return named;
-			}
-		}
-
-		List<CarrySlot> incomplete = session.incompleteSlots();
-		if (incomplete.size() == 1) {
-			return Optional.of(incomplete.getFirst());
-		}
-		return Optional.empty();
+	private void clearTracked() {
+		spawners.clear();
+		aliveTicks.clear();
 	}
 
 	private static boolean isSlayerBoss(List<ArmorStand> stands) {
 		for (ArmorStand stand : stands) {
 			String name = stand.getName().getString();
-			if (!name.contains("❤") && !name.toLowerCase(Locale.ROOT).contains("hit")) {
+			if (!name.contains("❤") && !name.contains(" Hit")) {
 				continue;
 			}
 			for (String slayerName : SLAYER_NAMES) {
@@ -173,12 +162,13 @@ public final class KillDetector {
 	private static String findSpawner(List<ArmorStand> stands) {
 		for (ArmorStand stand : stands) {
 			String name = stand.getName().getString();
-			int index = name.toLowerCase(Locale.ROOT).indexOf("spawned by:");
-			if (index >= 0) {
-				String spawner = name.substring(index + "spawned by:".length()).trim();
-				if (!spawner.isEmpty()) {
-					return spawner;
-				}
+			int index = name.indexOf("Spawned by:");
+			if (index < 0) {
+				continue;
+			}
+			String spawner = name.substring(index + "Spawned by:".length()).trim();
+			if (!spawner.isEmpty()) {
+				return spawner;
 			}
 		}
 		return null;
@@ -193,16 +183,11 @@ public final class KillDetector {
 			if (!(next instanceof ArmorStand stand)) {
 				break;
 			}
+			if (stand.distanceTo(entity) > NAMETAG_RANGE) {
+				break;
+			}
 			stands.add(stand);
 		}
 		return stands;
-	}
-
-	private static final class TrackedBoss {
-		String spawner;
-
-		TrackedBoss(String spawner) {
-			this.spawner = spawner;
-		}
 	}
 }
